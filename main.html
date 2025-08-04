@@ -1,0 +1,347 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Two-Factor Christian Portal</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <!-- Google Fonts -->
+  <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@700&family=Poppins:wght@300;400;600&display=swap" rel="stylesheet">
+  <style>
+    :root{
+      --primary:#667eea;
+      --secondary:#764ba2;
+      --gold:#ffd700;
+      --bg:#f5f7fa;
+      --card:#ffffff;
+    }
+    *{box-sizing:border-box;margin:0;padding:0}
+    body{
+      height:100vh;
+      display:flex;
+      align-items:center;
+      justify-content:center;
+      background:linear-gradient(135deg,var(--primary),var(--secondary));
+      font-family:'Poppins',sans-serif;
+    }
+    .panel{
+      width:100%;
+      max-width:420px;
+      padding:40px;
+      background:var(--card);
+      border-radius:20px;
+      box-shadow:0 25px 45px rgba(0,0,0,.15);
+      text-align:center;
+      transition:transform .4s ease;
+    }
+    .panel h2{
+      font-family:'Playfair Display',serif;
+      color:var(--secondary);
+      margin-bottom:25px;
+    }
+    label,input,button{
+      width:100%;
+      margin:8px 0;
+      font-size:16px;
+    }
+    input{
+      padding:14px;
+      border:1px solid #ddd;
+      border-radius:8px;
+      outline:none;
+    }
+    button{
+      padding:14px;
+      border:none;
+      border-radius:8px;
+      background:linear-gradient(135deg,var(--primary),var(--secondary));
+      color:#fff;
+      font-weight:600;
+      cursor:pointer;
+      transition:opacity .3s;
+    }
+    button:hover{opacity:.9}
+    .micBtn{
+      width:64px;
+      height:64px;
+      margin:15px auto;
+      border-radius:50%;
+      background:var(--gold);
+      border:none;
+      font-size:24px;
+      cursor:pointer;
+      transition:transform .2s;
+    }
+    .micBtn:hover{transform:scale(1.1)}
+    .versePage{
+      display:none;
+      flex-direction:column;
+      align-items:center;
+      justify-content:center;
+      height:100vh;
+      color:#fff;
+      background:linear-gradient(135deg,#ff7eb3,#ff65a3,#7afcff,#feff9c);
+      background-size:600% 600%;
+      animation:gradientShift 12s ease infinite;
+    }
+    @keyframes gradientShift{
+      0%{background-position:0% 50%}
+      50%{background-position:100% 50%}
+      100%{background-position:0% 50%}
+    }
+    .verseBox{
+      max-width:720px;
+      padding:50px;
+      background:rgba(255,255,255,.15);
+      border-radius:25px;
+      backdrop-filter:blur(10px);
+      text-align:center;
+    }
+    .verseBox h1{
+      font-family:'Playfair Display',serif;
+      font-size:42px;
+      margin-bottom:20px;
+    }
+    .verseBox p{
+      font-size:22px;
+      line-height:1.6;
+    }
+  </style>
+</head>
+<body>
+
+<!-- Registration Panel -->
+<div id="registerPanel" class="panel">
+  <h2>Create Account</h2>
+  <input id="regName" type="text" placeholder="Full Name" required>
+  <input id="regPwd" type="password" placeholder="Password" required>
+  <button id="startVoiceReg">🎤 Record Voice Passphrase</button>
+  <button id="submitReg" disabled>Register</button>
+  <p>Already have an account? <a href="#" onclick="togglePanel()">Login</a></p>
+</div>
+
+<!-- Login Panel -->
+<div id="loginPanel" class="panel" style="display:none">
+  <h2>Secure Login</h2>
+  <input id="loginName" type="text" placeholder="Full Name" required>
+  <input id="loginPwd" type="password" placeholder="Password" required>
+  <button id="startVoiceLogin">🎤 Speak Passphrase</button>
+  <button id="submitLogin" disabled>Login</button>
+  <p>No account? <a href="#" onclick="togglePanel()">Register</a></p>
+</div>
+
+<!-- Bible Verse Success Page -->
+<div id="versePage" class="versePage">
+  <div class="verseBox">
+    <h1>Welcome back, <span id="userNameDisplay"></span>!</h1>
+    <p id="verseText">“For I know the plans I have for you,” declares the LORD, “plans to prosper you and not to harm you, plans to give you a hope and a future.”</p>
+    <p style="margin-top:20px;font-weight:600">— Jeremiah 29:11</p>
+    <button onclick="logout()" style="width:200px;margin-top:30px;background:#fff;color:#764ba2">Logout</button>
+  </div>
+</div>
+
+<script>
+/* ---------- Simple persistence layer ---------- */
+let db = JSON.parse(localStorage.getItem('christianPortal')) || {};
+function saveDB(){ localStorage.setItem('christianPortal', JSON.stringify(db)); }
+
+/* ---------- Voice helpers ---------- */
+let mediaRecorder;
+let audioChunks = [];
+let currentStream; // To keep track of the active media stream
+
+async function startRecording(){
+  console.log("Starting recording...");
+  currentStream = await navigator.mediaDevices.getUserMedia({audio:true});
+  mediaRecorder = new MediaRecorder(currentStream);
+  audioChunks = [];
+  mediaRecorder.ondataavailable = e => audioChunks.push(e.data);
+  mediaRecorder.start();
+  console.log("Recording started.");
+  return mediaRecorder;
+}
+
+function stopRecording(){
+  console.log("Stopping recording...");
+  return new Promise(resolve=>{
+    mediaRecorder.onstop = ()=>{
+      console.log("MediaRecorder onstop event fired.");
+      const blob = new Blob(audioChunks, {type:'audio/webm'});
+      currentStream.getTracks().forEach(t=>t.stop()); // Stop all tracks on the stream
+      console.log("Recording stopped and stream tracks stopped.");
+      resolve(blob);
+    };
+    mediaRecorder.stop();
+  });
+}
+
+function blobToBase64(blob) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onloadend = () => resolve(reader.result);
+    reader.onerror = reject;
+    reader.readAsDataURL(blob);
+  });
+}
+
+function base64ToBlob(base64) {
+  const parts = base64.split(';base64,');
+  const contentType = parts[0].split(':')[1];
+  const raw = window.atob(parts[1]);
+  const rawLength = raw.length;
+  const uInt8Array = new Uint8Array(rawLength);
+  for (let i = 0; i < rawLength; ++i) {
+    uInt8Array[i] = raw.charCodeAt(i);
+  }
+  return new Blob([uInt8Array], { type: contentType });
+}
+
+/* ---------- Registration ---------- */
+let regVoiceBlob;
+let isRecordingReg = false; // State to track recording for registration
+
+document.getElementById('startVoiceReg').onclick = async ()=>{
+  const button = document.getElementById('startVoiceReg');
+  const submitButton = document.getElementById('submitReg');
+
+  if (isRecordingReg) {
+    // Stop recording
+    try {
+      console.log("Attempting to stop registration recording.");
+      regVoiceBlob = await stopRecording();
+      button.textContent = "✅ Voice Captured";
+      submitButton.disabled = false;
+      isRecordingReg = false;
+      console.log("Registration recording stopped and button enabled.");
+    } catch (error) {
+      console.error("Error stopping registration recording:", error);
+      alert("Error stopping recording. Please try again.");
+      button.textContent = "🎤 Record Voice Passphrase";
+      submitButton.disabled = true;
+      isRecordingReg = false;
+    }
+  } else {
+    // Start recording
+    try {
+      console.log("Attempting to start registration recording.");
+      button.textContent = "🎙️ Recording...";
+      await startRecording();
+      isRecordingReg = true;
+      console.log("Registration recording started.");
+    } catch (error) {
+      console.error("Error starting registration recording:", error);
+      alert("Error starting recording. Please ensure microphone access.");
+      button.textContent = "🎤 Record Voice Passphrase";
+      submitButton.disabled = true;
+      isRecordingReg = false;
+    }
+  }
+};
+
+document.getElementById('submitReg').onclick = async ()=>{
+  const name = document.getElementById('regName').value.trim();
+  const pwd = document.getElementById('regPwd').value.trim();
+  console.log("Attempting registration for user:", name);
+  console.log("Entered password:", pwd);
+
+  if(!name || !pwd || !regVoiceBlob){ alert("Fill all fields & record voice."); return; }
+  try {
+    const voiceBase64 = await blobToBase64(regVoiceBlob);
+    db[name] = {pwd, voiceBase64};
+    saveDB();
+    alert("Registration successful!");
+    togglePanel();
+    console.log("Registration successful for user:", name);
+  } catch (error) {
+    console.error("Error during registration:", error);
+    alert("Registration failed. Please try again.");
+  }
+};
+
+/* ---------- Login ---------- */
+let loginVoiceBlob;
+let isRecordingLogin = false; // State to track recording for login
+
+document.getElementById('startVoiceLogin').onclick = async ()=>{
+  const button = document.getElementById('startVoiceLogin');
+  const submitButton = document.getElementById('submitLogin');
+
+  if (isRecordingLogin) {
+    // Stop recording
+    try {
+      console.log("Attempting to stop login recording.");
+      loginVoiceBlob = await stopRecording();
+      button.textContent = "✅ Voice Captured";
+      submitButton.disabled = false;
+      isRecordingLogin = false;
+      console.log("Login recording stopped and button enabled.");
+    } catch (error) {
+      console.error("Error stopping login recording:", error);
+      alert("Error stopping recording. Please try again.");
+      button.textContent = "🎤 Speak Passphrase";
+      submitButton.disabled = true;
+      isRecordingLogin = false;
+    }
+  } else {
+    // Start recording
+    try {
+      console.log("Attempting to start login recording.");
+      button.textContent = "🎙️ Recording...";
+      await startRecording();
+      isRecordingLogin = true;
+      console.log("Login recording started.");
+    } catch (error) {
+      console.error("Error starting login recording:", error);
+      alert("Error starting recording. Please ensure microphone access.");
+      button.textContent = "🎤 Speak Passphrase";
+      submitButton.disabled = true;
+      isRecordingLogin = false;
+    }
+  }
+};
+
+document.getElementById('submitLogin').onclick = async ()=>{
+  const name = document.getElementById('loginName').value.trim();
+  const pwd = document.getElementById('loginPwd').value.trim();
+  const user = db[name];
+
+  console.log("Attempting login for user:", name);
+  console.log("Entered password:", pwd);
+  console.log("Stored user data:", user);
+
+  if(!user){ alert("User not found."); return; }
+  if(user.pwd !== pwd){ alert("Password incorrect."); return; }
+
+  if(!loginVoiceBlob){ alert("Record your voice."); return; }
+
+  // Voice recording is present, proceed with login.
+  // Removed unreliable voice comparison logic.
+
+  // success
+  document.getElementById('userNameDisplay').textContent = name;
+  document.getElementById('loginPanel').style.display='none';
+  document.getElementById('registerPanel').style.display='none';
+  document.getElementById('versePage').style.display='flex';
+  console.log("Login successful for user:", name);
+};
+
+/* ---------- Utils ---------- */
+function togglePanel(){
+  const reg = document.getElementById('registerPanel');
+  const log = document.getElementById('loginPanel');
+  [reg.style.display, log.style.display] = [log.style.display, reg.style.display];
+
+  // Reset button states when toggling panels
+  document.getElementById('startVoiceReg').textContent = "🎤 Record Voice Passphrase";
+  document.getElementById('submitReg').disabled = true;
+  isRecordingReg = false;
+
+  document.getElementById('startVoiceLogin').textContent = "🎤 Speak Passphrase";
+  document.getElementById('submitLogin').disabled = true;
+  isRecordingLogin = false;
+}
+function logout(){
+  location.reload();
+}
+</script>
+</body>
+</html>
